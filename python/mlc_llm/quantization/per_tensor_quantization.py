@@ -101,12 +101,6 @@ class PerTensorQuantize:  # pylint: disable=too-many-instance-attributes
                         f"{name}.q_weight",
                     ]
                 )
-                if isinstance(node, nn.Linear) and (
-                    not is_final_fc(name) or self.config.quantize_final_fc
-                ):
-                    self.quant_map.param_map[weight_name] = param_names
-                    self.quant_map.map_func[weight_name] = self.config.quantize_weight
-                    return PerTensorQuantizeLinear.from_linear(node, self.config)
                 if isinstance(node, nn.Embedding) and self.config.quantize_embedding:
                     self.quant_map.param_map[weight_name] = param_names
                     self.quant_map.map_func[weight_name] = self.config.quantize_weight
