@@ -140,14 +140,19 @@ def detect_model_type(model_type: str, config: Path) -> "Model":
     if model_type == "auto":
         with open(config, "r", encoding="utf-8") as config_file:
             cfg = json.load(config_file)
-        if "model_type" not in cfg and (
-            "model_config" not in cfg or "model_type" not in cfg["model_config"]
-        ):
+        if "model_type" in cfg:
+            model_type = cfg["model_type"]
+        elif "field_model_type" in cfg:
+            model_type = cfg["field_model_type"]
+        elif "model_config" in cfg:
+            model_type = cfg["model_config"]["model_type"]
+        elif "field_model_config" in cfg:
+            model_type = cfg["field_model_config"]["field_model_type"]
+        else:
             raise ValueError(
                 f"'model_type' not found in: {config}. "
                 f"Please explicitly specify `--model-type` instead."
             )
-        model_type = cfg["model_type"] if "model_type" in cfg else cfg["model_config"]["model_type"]
     if model_type in ["mixformer-sequential"]:
         model_type = "phi-msft"
     logger.info("%s model type: %s. Use `--model-type` to override.", FOUND, bold(model_type))

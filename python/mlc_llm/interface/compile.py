@@ -205,8 +205,8 @@ def compile(  # pylint: disable=too-many-arguments,redefined-builtin
     debug_dump: Optional[Path] = None,
 ):
     """Compile a model given its configuration and quantization format to a specific target."""
-    if "model_config" in config:
-        model_config = config.pop("model_config")
+    if "field_model_config" in config:
+        model_config = config.pop("field_model_config")
         model_config.update(config)
         model_config = model_type.config.from_dict(model_config)
     else:
