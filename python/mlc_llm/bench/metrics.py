@@ -86,8 +86,7 @@ class MetricsProcessor:
             completion_tokens = self.count_tokens(metric.output)
             assert prompt_tokens > 0 and completion_tokens >= 0, "Invalid prompt tokens"
             end_to_end_latency = metric.end_to_end_latency
-            if metric.ttft is None:
-                ttft = 0
+            ttft = metric.ttft if metric.ttft is not None else 0
             refined_metric = Metrics(
                 inter_token_latency=end_to_end_latency / completion_tokens,
                 decode_token_latency=(end_to_end_latency - ttft) / completion_tokens,

@@ -98,7 +98,7 @@ class OpenAIRequestSender:
             prompt = self.prompt_generator.generate_prompt(prompt_tokens)
             params["messages"] = [{"role": "system", "content": prompt}]
         else:
-            prompt = params["messages"][0]["content"]
+            prompt = params["messages"][-1]["content"]
         chat_params = self._get_chat_completion_params(params)
         if "stream" not in chat_params:
             chat_params["stream"] = self.stream
