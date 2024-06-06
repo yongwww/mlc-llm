@@ -4,6 +4,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import httpx
+import aiohttp
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from typing_extensions import Self
@@ -53,6 +54,8 @@ class OpenAIRequestSender:
         port: Optional[int] = 8008,
         stream: Optional[bool] = None,
         timeout: Optional[float] = None,
+        client: Optional[Any] = None,
+        server_metrics: Optional[bool] = False,
     ) -> None:
         from transformers import (  # pylint: disable=import-outside-toplevel,import-error
             LlamaTokenizerFast,
@@ -68,12 +71,20 @@ class OpenAIRequestSender:
             api_key="None",
             http_client=httpx.AsyncClient(http2=True),
         )
+        self.aiohttp_client = aiohttp.ClientSession()
+        self.host = host
+        self.port = port
+        self.url = f"http://{self.host}:{self.port}/v1/chat/completions"
+        self.headers = {"Content-Type": "application/json"}
+        self.httpx_client = httpx.AsyncClient() # http2=True
+        self.num_completed_requests = 20
 
     async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:
         await self.client.close()
+        await self.aiohttp_client.close()
 
     async def __call__(self, params: Dict[str, Any] = None) -> None:
         """
@@ -99,41 +110,41 @@ class OpenAIRequestSender:
             prompt = self.prompt_generator.generate_prompt(prompt_tokens)
             params["messages"] = [{"role": "system", "content": prompt}]
         else:
-            prompt = params["messages"][0]["content"]
+            prompt = params["messages"][-1]["content"]
         chat_params = self._get_chat_completion_params(params)
         if "stream" not in chat_params:
             chat_params["stream"] = self.stream
         if "timeout" not in chat_params:
             chat_params["timeout"] = self.timeout
 
-        total_request_time = 0
-        generated_text = ""
-        ttft = None
-        start_time = time.monotonic()
-        # chat_params["stream_options"] = {"include_usage": True}
-        response = await self.client.chat.completions.create(**chat_params)
+        for _ in range(self.num_completed_requests):
+            total_request_time = 0
+            generated_text = ""
+            ttft = None
+            start_time = time.monotonic()
+            # chat_params["stream_options"] = {"include_usage": True}
+            response = await self.client.chat.completions.create(**chat_params)
+            if chat_params["stream"]:
+                async for chunk in response:
+                    if chunk.usage:
+                        logger.info(
+                            "Server Metrics:\n%s", json.dumps(chunk.usage.extra, indent=4, default=str)
+                        )
+                    elif chunk.choices[0].delta.content is not None:
+                        if not ttft:
+                            ttft = time.monotonic() - start_time  # type: ignore
+                        generated_text += chunk.choices[0].delta.content
+            else:
+                generated_text = response.choices[0].message.content
 
-        if chat_params["stream"]:
-            async for chunk in response:
-                if chunk.usage:
-                    logger.info(
-                        "Server Metrics:\n%s", json.dumps(chunk.usage.extra, indent=4, default=str)
-                    )
-                elif chunk.choices[0].delta.content is not None:
-                    if not ttft:
-                        ttft = time.monotonic() - start_time  # type: ignore
-                    generated_text += chunk.choices[0].delta.content
-        else:
-            generated_text = response.choices[0].message.content
-
-        total_request_time = time.monotonic() - start_time  # type: ignore
-        req_rec = RequestRecords(
-            input=prompt,
-            output=generated_text,
-            end_to_end_latency_s=total_request_time,
-            ttft=ttft,
-        )
-        self.request_records.append(req_rec)
+            total_request_time = time.monotonic() - start_time  # type: ignore
+            req_rec = RequestRecords(
+                input=prompt,
+                output=generated_text,
+                end_to_end_latency_s=total_request_time,
+                ttft=ttft,
+            )
+            self.request_records.append(req_rec)
 
     def _get_chat_completion_params(self, params: Dict) -> Dict:
         """
@@ -165,3 +176,107 @@ class OpenAIRequestSender:
             The list of collected request records.
         """
         return self.request_records
+
+    async def aiohttp_send_request(self, params: Dict[str, Any] = None) -> None:
+        if "messages" not in params:
+            prompt_tokens = 128
+            prompt = self.prompt_generator.generate_prompt(prompt_tokens)
+            params["messages"] = [{"role": "system", "content": prompt}]
+        else:
+            prompt = params["messages"][-1]["content"]
+        chat_params = self._get_chat_completion_params(params)
+        
+        for _ in range(self.num_completed_requests):
+            total_request_time = 0
+            generated_text = ""
+            ttft = None
+            start_time = time.monotonic()
+            try:
+                async with self.aiohttp_client.post(self.url, json=chat_params, headers=self.headers) as response:
+                    async for chunk in response.content:
+                        chunk = chunk.strip()
+                        if not chunk or chunk == b"\n":
+                            continue
+                        raw_data = chunk[6:].strip()
+                        if raw_data == b"[DONE]":
+                            continue
+                        data = json.loads(raw_data)
+                        delta = data["choices"][0]["delta"]
+
+                        if delta.get("content", None):
+                            if not ttft:
+                                ttft = time.monotonic() - start_time
+
+                        generated_text += delta["content"]
+            except Exception as e:
+                logger.error("Error sending request with aiohttp: %s", str(e))
+            total_request_time = time.monotonic() - start_time  # type: ignore
+            req_rec = RequestRecords(
+                input=prompt,
+                output=generated_text,
+                end_to_end_latency_s=total_request_time,
+                ttft=ttft,
+            )
+            self.request_records.append(req_rec)
+
+    async def httpx_send_request(self, params: Dict[str, Any] = None) -> None:
+        if "messages" not in params:
+            prompt_tokens = 128
+            prompt = self.prompt_generator.generate_prompt(prompt_tokens)
+            params["messages"] = [{"role": "system", "content": prompt}]
+        else:
+            prompt = params["messages"][-1]["content"]
+        chat_params = self._get_chat_completion_params(params)
+        
+        for _ in range(self.num_completed_requests):
+            total_request_time = 0
+            generated_text = ""
+            ttft = None
+            start_time = time.monotonic()
+            try:
+                # async with self.httpx_client.post(self.url, json=chat_params, headers=self.headers) as response
+                # response = await self.httpx_client.post(self.url, json=chat_params, headers=self.headers)
+                async with self.httpx_client.stream('POST', self.url, json=chat_params, headers=self.headers) as response:
+                    async for chunk in response.aiter_text():
+                        chunk = chunk.strip()
+                        if not chunk or chunk == b"\n":
+                            continue
+                        chunk = chunk[6:].strip()
+                        if chunk == "[DONE]":
+                            continue
+                        data = json.loads(chunk)
+                        delta = data["choices"][0]["delta"]
+
+                        if delta["content"]:
+                            if not ttft:
+                                ttft = time.monotonic() - start_time
+                        generated_text += delta["content"]
+
+                
+                """
+                async for chunk in response.aiter_lines():
+                    chunk = chunk.strip()
+                    if not chunk or chunk == b"\n":
+                        continue
+                    chunk = chunk[6:].strip()
+                    if chunk == "[DONE]":
+                        continue
+                    data = json.loads(chunk)
+                    delta = data["choices"][0]["delta"]
+
+                    if delta["content"]:
+                        if not ttft:
+                            ttft = time.monotonic() - start_time
+                    generated_text += delta["content"]
+                """
+            except Exception as e:
+                logger.error("Error sending request with httpx: %s", str(e))
+                raise e
+            total_request_time = time.monotonic() - start_time  # type: ignore
+            req_rec = RequestRecords(
+                input=prompt,
+                output=generated_text,
+                end_to_end_latency_s=total_request_time,
+                ttft=ttft,
+            )
+            self.request_records.append(req_rec)
