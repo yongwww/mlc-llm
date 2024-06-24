@@ -128,6 +128,7 @@ class OpenAIRequestSender:  # pylint: disable=too-many-instance-attributes
             else:
                 generated_text = response.choices[0].message.content
         else:
+            chat_params["stream"] = True # TODO (yongwww) remove this hack
             try:
                 async with self.client.post(
                     self.url, json=chat_params, headers=self.headers

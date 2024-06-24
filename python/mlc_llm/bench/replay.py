@@ -47,7 +47,22 @@ def load_replay_log(log_path: str) -> List[Dict]:
         with open(log_path, "r", encoding="utf-8") as file:
             data = [json.loads(line) for line in file]
             for row in data:
-                row["timestamp"] = datetime.fromisoformat(str(row["timestamp"]))
+                if any(key.lower() == "timestamp" for key in row):
+                    timestamp_key = next(key for key in row if key.lower() == "timestamp")
+                    row["timestamp"] = datetime.fromisoformat(str(row[timestamp_key]))
+                elif any(key.lower() == "date" for key in row):
+                    date_key = next(key for key in row if key.lower() == "date")
+                    row["timestamp"] = datetime.fromisoformat(str(row[date_key]))
+                else:
+                    raise ValueError("The timestamp/date field is required in .jsonl.")
+                if any(key.lower() == "request" for key in row):
+                    request_key = next(key for key in row if key.lower() == "request")
+                    request_dict = row.pop(request_key)
+                    for key, value in request_dict.items():
+                        if key not in row:
+                            row[key] = value
+        # Sort the data based on the 'timestamp' field
+        data.sort(key=lambda x: x["timestamp"])
         return data
     raise ValueError("Unsupported file format. Please use .csv or .jsonl.")
 
