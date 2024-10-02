@@ -98,11 +98,18 @@ def run_pipeline(
         args.input_len_std,
         args.output_len_std,
     )
+    print(f"yongwww 101 request_records")
+    # TODO (yongwww): for replay, all the params of request_records should be filled, so only warm_and_run pipeline works
+    # All the other pipeline should be ignored.
+
+    ## TODO (yongwww)
+    # params like top_p are in pipeline, so I should update the pipeline and dataset.
     request_records = pipeline(request_records)
-    assert len(request_records) == args.num_requests
+    print(f"yongwww 103 request_records: {request_records}")
+    # assert len(request_records) == args.num_requests
 
     request_records = MetricAnalyzer(tokenizer)(request_records)
-    report = generate_metrics_summary(request_records, args.num_requests, args.num_gpus)
+    report = generate_metrics_summary(request_records, len(dataset.dataset), args.num_gpus)
     return report
 
 
@@ -121,14 +128,19 @@ def main(args: argparse.argparse.Namespace):
     mlc_server = None
     if args.mlc_model_lib:
         mlc_server = _launch_mlc_server(args)
-    if args.num_requests <= 0:
+    if args.num_requests and args.num_requests <= 0:
         raise ValueError("Number of requests to benchmark must be positive.")
 
     def _main():
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
         dataset = create_dataset(args, tokenizer)
+        # TODO (yongwww): Update args with values from dataset. No, since each chat request params could be quite difference from others.
+        # print(f"yongwww dastaset: {dataset}")
+        # TODO (yongwww): create_api_endpoint may depend on the dataset if replay.
         f_create_api_endpoint = functools.partial(create_api_endpoint, args)
+
         pipelines = create_pipelines(args, f_create_api_endpoint)
+        # print(f"yongwww pipelines: {pipelines}")
         reports = []
         for pipeline in pipelines:
             report = run_pipeline(pipeline, dataset, tokenizer, args)
@@ -187,7 +199,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-requests",
         type=int,
-        required=True,
         help="The number of requests for benchmark.",
     )
     parser.add_argument(

@@ -58,7 +58,7 @@ class OpenAIChatEndPoint(APIEndPoint):
     async def __aenter__(self) -> Self:
         import aiohttp  # pylint: disable=import-outside-toplevel,import-error
 
-        self.client = aiohttp.ClientSession()
+        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=600))
         return self
 
     async def __aexit__(self, exc_type, exc_value, tb) -> None:
@@ -202,7 +202,7 @@ class OpenAIEndPoint(APIEndPoint):
     async def __aenter__(self) -> Self:
         import aiohttp  # pylint: disable=import-outside-toplevel,import-error
 
-        self.client = aiohttp.ClientSession()
+        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=600))
         return self
 
     async def __aexit__(self, exc_type, exc_value, tb) -> None:
@@ -310,7 +310,7 @@ class TensorRTLLMEndPoint(APIEndPoint):
     async def __aenter__(self) -> Self:
         import aiohttp  # pylint: disable=import-outside-toplevel,import-error
 
-        self.client = aiohttp.ClientSession()
+        self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=600))
         return self
 
     async def __aexit__(self, exc_type, exc_value, tb) -> None:

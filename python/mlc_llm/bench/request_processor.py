@@ -101,6 +101,7 @@ class AttachExecutionFeature(RequestProcessor):  # pylint: disable=too-few-publi
         return request_records
 
 
+# TODO (yongwww): check if the parameters are in RequestRecord first, if the value is already set, just ignore
 class AttachStreamFlag(RequestProcessor):  # pylint: disable=too-few-public-methods
     """The processor that attaches the stream flag to the requests."""
 
@@ -179,7 +180,7 @@ class WarmupAndRun(RequestProcessor):  # pylint: disable=too-few-public-methods
         self.cuda_profile_url = cuda_profile_url
 
     def __call__(self, request_records: List[RequestRecord]) -> List[RequestRecord]:
-        assert len(request_records) == self.num_warmup_requests + self.num_benchmark_requests
+        # assert len(request_records) == self.num_warmup_requests + self.num_benchmark_requests
         warmup_requests = request_records[: self.num_warmup_requests]
         benchmark_requests = request_records[self.num_warmup_requests :]
         for request_record in warmup_requests:
@@ -196,6 +197,7 @@ class WarmupAndRun(RequestProcessor):  # pylint: disable=too-few-public-methods
             cuda_profiler_start_response = requests.post(cuda_profiler_start_url, timeout=60)
             assert cuda_profiler_start_response.status_code == 200
         logger.info("Warmup finished. Start benchmarking...")
+        print(f"yongwww debug 198 self.pipeline: {self.pipeline}")
         updated_request_records = self.pipeline(benchmark_requests)
         if self.cuda_profile_url is not None:
             cuda_profiler_stop_url = self.cuda_profile_url + "/debug/cuda_profiler_stop"
@@ -527,20 +529,20 @@ def create_pipelines(
             )
         return pipelines
     if args.request_rate is not None:
+        # TODO (yongwww): update here
         if args.num_warmup_requests is None:
             raise ValueError(
                 "Please specify the number of warmup requests via "
                 '"--num-warmup-requests" when fixing request rate.'
             )
-        # for request_rate in args.request_rate:
         return [
             SequentialProcessor(
                 LogMessage(f"Fixing request rate: {request_rate}"),
-                SampleRequests(args.num_requests + args.num_warmup_requests),
+                # SampleRequests(args.num_requests + args.num_warmup_requests),
                 AttachModelName(args.tokenizer),
-                AttachRequestRateTimestamp(request_rate),
-                AttachStreamFlag(args.stream),
-                AttachSamplingOptions(args.temperature, args.top_p),
+                # AttachRequestRateTimestamp(request_rate),
+                # AttachStreamFlag(args.stream),
+                # AttachSamplingOptions(args.temperature, args.top_p),
                 AttachExecutionFeature({"request_rate": request_rate}),
                 WarmupAndRun(
                     num_warmup_requests=args.num_warmup_requests,

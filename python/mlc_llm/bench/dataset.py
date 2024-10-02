@@ -4,6 +4,8 @@ import argparse
 import json
 import random
 from typing import List, Optional, Tuple
+from typing import Dict
+import pandas as pd
 
 import numpy as np
 from datasets import load_dataset  # pylint: disable=import-error
@@ -264,6 +266,107 @@ class JSONModeEvalDataset(Dataset):  # pylint: disable=too-few-public-methods
         return request_records
 
 
+def load_replay_log(log_path: str) -> List[Dict]:
+    """
+    Load replay log from file
+
+    Parameters
+    ----------
+    log_path : str
+        The path to the event log CSV or JSONL file containing the events to replay.
+
+    Returns
+    -------
+    res: List[Dict]
+        A list of preprocessed event data for replay.
+    """
+    if log_path.endswith(".csv"):
+        import pandas as pd  # pylint: disable=import-outside-toplevel,import-error
+
+        df = pd.read_csv(log_path)
+        column_names = df.columns.values
+        # Date	@request.best_of	@request.echo	@request.frequency_penalty	@request.ignore_eos	@request.loglikelihood \
+        # 	@request.max_tokens	@request.n	@request.presence_penalty	@request.repetition_penalty	@request.seed	\
+        # @request.temperature	@request.top_p	@request.stream	@request_path	@request.messages	@request.prompt	Message
+        keys = ["Date", "@request.best_of", "@request.echo", "@request.frequency_penalty", "@request.ignore_eos",
+                "@request.loglikelihood", "@request.max_tokens", "@request.n", "@request.presence_penalty",
+                "@request.repetition_penalty", "@request.seed", "@request.temperature", "@request.top_p",
+                "@request.stream", "@request_path", "@request.messages", "@request.prompt"]
+        # df["timestamp"] = pd.to_datetime(df["Date"])
+        df.sort_values("Date", inplace=True)
+        # Get the request params from the loaded CSV
+        params = []
+        for _, row in df.iterrows():
+            param = {}
+            for key in keys:
+                param[key] = row[key]
+            param["timestamp"] = pd.to_datetime(row["Date"])
+            params.append(param)
+            # if len(params) > 1:
+            #    return params
+        return params
+
+
+class ReplayDataset(Dataset):  # pylint: disable=too-few-public-methods
+    """The dataset class for replay dataset."""
+
+    def __init__(self, log_path: str, tokenizer: AutoTokenizer) -> None:
+        self.tokenizer = tokenizer
+        self.dataset = load_replay_log(log_path)
+        # print(f"yongwww replay dataset: {len(self.dataset)}")
+
+    def generate_request_records(
+        self,
+        input_len: Optional[int],
+        output_len: Optional[int],
+        input_len_std: float = 0.0,
+        output_len_std: float = 0.0,
+    ) -> List[RequestRecord]:
+        request_records = []
+        for data in self.dataset:
+            # If the request does not have enough length, discard it.
+            if input_len is not None and data["input_tokens"] < input_len + 4 * input_len_std:
+                continue
+
+            if not isinstance(data["@request.prompt"], str):
+                continue
+
+            if isinstance(data['timestamp'], pd.Timestamp):
+                timestamp = data['timestamp'].timestamp()
+            request_records.append(
+                RequestRecord(
+                    timestamp=data["timestamp"].timestamp(),
+                    chat_cmpl=ChatCompletionRequest(
+                        messages=[ChatCompletionMessage(content=data["@request.prompt"], role="user")],
+                        model="",
+                        max_tokens=data["@request.max_tokens"],
+                        response_format=data.get("response_format"),
+                        frequency_penalty=data["@request.frequency_penalty"],
+                        presence_penalty=data["@request.presence_penalty"],
+                        top_p=data["@request.top_p"],
+                        stream=data["@request.stream"],
+                        temperature=data["@request.temperature"],
+                        n=data["@request.n"],
+                    ),
+                    metrics=Metrics(
+                        success=False,
+                        start_time=0,
+                        finish_time=0,
+                        end_to_end_latency_s=0,
+                        input_tokens=len(
+                            self.tokenizer(
+                                data["@request.prompt"],
+                                truncation=True,
+                            ),
+                        ),
+                    ),
+                )
+            )
+            if len(request_records) > 50:
+                return request_records
+        return request_records
+
+
 # Todo: dataset of log replay  # pylint: disable=fixme
 # NOTE: moved from the previous "python/mlc_llm/bench/prompts.py"
 # class PromptsGenerator:  # pylint: disable=too-few-public-methods
@@ -454,6 +557,7 @@ SUPPORTED_DATASET = [
     "sharegpt",
     "llmperf",
     "json-mode-eval",
+    "replay",
 ]
 
 
@@ -474,4 +578,13 @@ def create_dataset(args: argparse.Namespace, tokenizer: AutoTokenizer) -> "Datas
         return LLMPerfDataset(args.dataset_path, args.num_requests * 4, tokenizer)
     if args.dataset == "json-mode-eval":
         return JSONModeEvalDataset(tokenizer)
+    # TODO (yongwww): Add the log replay dataset.
+    print(f"yongwww dataset: {args.dataset}, dataset_path: {args.dataset_path}")
+    if args.dataset == "replay":
+        return ReplayDataset(args.dataset_path, tokenizer)
+        # raise NotImplementedError("The log replay dataset is not implemented yet")
+        # Question: Where to add request parameters like top_k, temperature, etc?
+        # A: it could be in DataSet, since the return RequestRecord has parmaters embedded.
+        #    But the existing sharedgpt and llmperf dataset doesn't add these parameters in dataset even we can do that.
+        #    The existing code is to have the request params like top_k in pipeline. So we should figure out a way to fill the pipeline from saved files like replay log.
     raise ValueError(f"Unrecognized dataset {args.dataset}")
