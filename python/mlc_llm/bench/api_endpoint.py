@@ -5,11 +5,12 @@ import json
 import os
 import time
 import traceback
-from typing import Optional
+from typing import Optional, Any
 
 from typing_extensions import Self
 
 from mlc_llm.bench.request_record import Metrics, RequestRecord, ServerMetrics
+from mlc_llm.protocol.openai_api_protocol import ChatCompletionRequest
 from mlc_llm.support import logging
 
 logging.enable_logging()
@@ -188,10 +189,12 @@ class OpenAIEndPoint(APIEndPoint):
         super().__init__(include_server_metrics=include_server_metrics)
 
         import aiohttp  # pylint: disable=import-outside-toplevel,import-error
+        import httpx
+        from openai import AsyncOpenAI
 
         self.timeout = timeout
-        self.client: aiohttp.ClientSession = None
-        self.url = f"http://{host}:{port}/v1/completions"
+        self.client: Any = None
+        self.url = f"http://{host}:{port}/v1"
         self.headers = {"Content-Type": "application/json"}
         if os.getenv("MLC_LLM_API_KEY"):
             self.headers["Authorization"] = f"Bearer {os.getenv('MLC_LLM_API_KEY')}"
@@ -201,8 +204,15 @@ class OpenAIEndPoint(APIEndPoint):
 
     async def __aenter__(self) -> Self:
         import aiohttp  # pylint: disable=import-outside-toplevel,import-error
+        import httpx
+        from openai import AsyncOpenAI
 
-        self.client = aiohttp.ClientSession()
+        # self.client = aiohttp.ClientSession()
+        self.client = AsyncOpenAI(
+            base_url=self.url,
+            api_key="None",
+            http_client=httpx.AsyncClient(http2=True),
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_value, tb) -> None:
@@ -235,7 +245,35 @@ class OpenAIEndPoint(APIEndPoint):
         first_chunk_output_str = ""
         time_to_first_token_s = None
         start_time = time.monotonic()
+        
 
+        def get_completion_params(request_record: RequestRecord) -> dict:
+            """Get the completion params for the given request record."""
+            return {
+                "model": request_record.chat_cmpl.model,
+                "prompt": request_record.chat_cmpl.messages[0].content,
+                "temperature": request_record.chat_cmpl.temperature,
+                "top_p": request_record.chat_cmpl.top_p,
+                "max_tokens": request_record.chat_cmpl.max_tokens,
+                "stream": True,
+            }
+        
+        completions_params = get_completion_params(request_record)
+        # print(f"yongwww completions_params: {completions_params.keys()}")
+        
+
+        response = await self.client.completions.create(**completions_params)
+        if completions_params["stream"]:
+            async for chunk in response:
+                print(f"yongwww chuck type {type(chunk)}, chuck: {chunk}")
+                if chunk.choices[0].text is not None:
+                    if not time_to_first_token_s:
+                        time_to_first_token_s = time.monotonic() - start_time  # type: ignore
+                    generated_text += chunk.choices[0].text
+        else:
+            generated_text = response.choices[0].message.content
+
+        """
         try:
             async with self.client.post(self.url, json=payload, headers=self.headers) as response:
                 if payload["stream"]:
@@ -276,6 +314,7 @@ class OpenAIEndPoint(APIEndPoint):
             )
             return request_record
 
+        """
         finish_time = time.monotonic()
         request_record.output_str = generated_text
         request_record.first_chunk_output_str = first_chunk_output_str
