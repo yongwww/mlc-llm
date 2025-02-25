@@ -167,6 +167,21 @@ def get_instrument(args):
         sess.upload(args.cmp_lib_path)
         lib = sess.load_module(os.path.basename(args.cmp_lib_path))
         cmp_device = sess.cl(0)
+    elif args.cmp_device == "orin":
+        assert args.cmp_lib_path.endswith(".so"), "Require a so file for Orin"
+        tracker_host = os.environ.get("TVM_TRACKER_HOST", "10.110.51.94")
+        tracker_port = int(os.environ.get("TVM_TRACKER_PORT", "9090"))
+        sess = rpc.connect(tracker_host, tracker_port)
+        # tracker = rpc.connect_tracker(tracker_host, tracker_port)
+        print(f"Connected to {tracker_host}:{tracker_port}")
+        # sess = tracker.request("orin")
+        # print(f"Requesting orin session")
+        # sess.upload(args.cmp_lib_path)
+        print(f"Uploaded {args.cmp_lib_path}")
+        lib = sess.load_module('/home/jetson/yowu/mlc-llm/tgt_model/Llama-3.1-8B-Instruct-q4f16_ft-1gpu/989803945688b57f418e7bd1296f06134046115b-b66965c13312eaeca824a66bc7c1f1d6f6f7927b-1-cudagraph-1-cutlass-1-cublas_gemm.so')
+        # print(f"Loaded {os.path.basename(print(f"Loaded {os.path.basename('/home/jetson/yowu/mlc-llm/tgt_model/Llama-3.1-8B-Instruct-q4f16_ft-1gpu/989803945688b57f418e7bd1296f06134046115b-b66965c13312eaeca824a66bc7c1f1d6f6f7927b-1-cudagraph-1-cutlass-1-cublas_gemm.so')}"))}")
+        cmp_device = sess.cuda(0)
+        print(f"Created orin device")
     else:
         lib = tvm.runtime.load_module(args.cmp_lib_path)
         cmp_device = tvm.device(args.cmp_device)
