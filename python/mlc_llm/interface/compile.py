@@ -135,6 +135,7 @@ def _compile(args: CompileArgs, model_config: ConfigBase):
             flashinfer=args.opt.flashinfer,
             faster_transformer=args.opt.faster_transformer,
             cutlass=args.opt.cutlass,
+            cublas_gemm=args.opt.cublas_gemm,
         )
         # Step 1. Create the quantized model
         logger.info("Creating model from: %s", model_config)
@@ -182,6 +183,13 @@ def _compile(args: CompileArgs, model_config: ConfigBase):
             "disaggregation": getattr(model_config, "disaggregation", False),
             "kv_state_kind": _infer_kv_state_kind(args.model.name),
             "max_batch_size": getattr(model_config, "max_batch_size", 1),
+            # Store external module flags for inference
+            "external_modules": {
+                "flashinfer": args.opt.flashinfer,
+                "faster_transformer": args.opt.faster_transformer,
+                "cutlass": args.opt.cutlass,
+                "cublas_gemm": args.opt.cublas_gemm,
+            },
         }
         logger.info("Registering metadata: %s", metadata)
         metadata["params"] = [_get_param_metadata(name, param) for name, param in named_params]

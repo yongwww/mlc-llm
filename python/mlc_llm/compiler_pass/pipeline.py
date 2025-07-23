@@ -121,8 +121,8 @@ def _mlc_llm_pipeline(  # pylint: disable=too-many-arguments
                 # Phase 1. Passes on high-level operator graph
                 _LogProgress("Running TVM Relax graph-level optimizations"),
                 DispatchTritonKernel(target),
-                FuseFTDequantizeEpilogue(),
-                FuseDequantizeTranspose(),
+                FuseFTDequantizeEpilogue() if not cublas_gemm else tvm.transform.Sequential([]),
+                FuseDequantizeTranspose() if not cublas_gemm else tvm.transform.Sequential([]),
                 BLASDispatch(target) if cublas_gemm else tvm.transform.Sequential([]),
                 (
                     FuseAddRMSNorm(target=target)

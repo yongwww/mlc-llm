@@ -25,7 +25,7 @@ def convert_uint_to_float(  # pylint: disable=too-many-arguments
     """Convert a quantized uint weight to an unquantized float weight."""
     tir_bin_mask = tir.const((1 << bits) - 1, storage_dtype)
     if out_shape is None:
-        out_shape = weight.shape
+        out_shape = list(weight.shape)
         out_shape[axis] *= num_elem_per_storage
     axis = axis if axis >= 0 else len(out_shape) + axis
     return te.compute(

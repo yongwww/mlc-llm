@@ -16,7 +16,7 @@ before any compilation happens, and configured during a model's `forward` method
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Dict
 
 from tvm.target import Target
 
@@ -31,13 +31,28 @@ class ExternModuleStore:
     faster_transformer: bool = False
     cutlass_group_gemm: bool = False
     cutlass_gemm: bool = False
+    cublas_gemm: bool = False
 
 
 STORE: ExternModuleStore = ExternModuleStore()
 """Singleton of `ExternModuleStore`."""
 
+_EXTERNAL_FLAGS: Optional[Dict[str, bool]] = None
 
-def enable(target: Target, flashinfer: bool, faster_transformer: bool, cutlass: bool) -> None:
+
+def set_external_flags(flags: Dict[str, bool]) -> None:
+    """Set external module flags for inference configuration.
+    
+    Parameters
+    ----------
+    flags : Dict[str, bool]
+        External module flags to set.
+    """
+    global _EXTERNAL_FLAGS
+    _EXTERNAL_FLAGS = flags
+
+
+def enable(target: Target, flashinfer: bool, faster_transformer: bool, cutlass: bool, cublas_gemm: bool = False) -> None:
     """Enable external modules. It should be called before any compilation happens."""
     global STORE  # pylint: disable=global-statement
     cutlass = (
@@ -53,6 +68,7 @@ def enable(target: Target, flashinfer: bool, faster_transformer: bool, cutlass: 
         faster_transformer=faster_transformer,
         cutlass_group_gemm=cutlass,
         cutlass_gemm=cutlass,
+        cublas_gemm=cublas_gemm,
     )
 
 
@@ -61,16 +77,31 @@ def get_store() -> ExternModuleStore:
     return STORE
 
 
-def configure() -> None:
+def configure(external_flags: Optional[Dict[str, bool]] = None) -> None:
     """Configure external modules with extra parameters. It should be called during a model's
     `forward` method is invoked.
 
     Parameters
     ----------
+    external_flags : Optional[Dict[str, bool]]
+        External module flags to configure. If None, will use globally set flags.
     """
+    global _EXTERNAL_FLAGS
     store = get_store()
     if store.configured:
         return
     store.configured = True
+    
+    # Use provided flags, or fall back to globally set flags
+    flags_to_use = external_flags or _EXTERNAL_FLAGS
+    
+    # If external flags are available, use them to configure the store
+    if flags_to_use is not None:
+        store.flashinfer = flags_to_use.get("flashinfer", store.flashinfer)
+        store.faster_transformer = flags_to_use.get("faster_transformer", store.faster_transformer)
+        store.cutlass_group_gemm = flags_to_use.get("cutlass", store.cutlass_group_gemm)
+        store.cutlass_gemm = flags_to_use.get("cutlass", store.cutlass_gemm)
+        store.cublas_gemm = flags_to_use.get("cublas_gemm", store.cublas_gemm)
+    
     if store.flashinfer or store.faster_transformer:
         assert store.target.kind.name == "cuda"
